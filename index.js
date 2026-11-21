@@ -65,6 +65,14 @@ app.delete('/services/:id', async(req, res)=>{
     res.send(result);
 })
 
+app.post('/bookings', async(req, res)=>{
+    const data = req.body;
+    const result = await bookings.insertOne(data);
+    res.send(result);
+})
+
+
+
 app.get('/', async(req, res)=>{
     res.send('Api is working fine');
 })
