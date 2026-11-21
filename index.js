@@ -32,6 +32,10 @@ app.get('/categories', async(req, res)=>{
     res.send(result);
 })
 
+app.get('/services', async(req, res)=>{
+    const result = await services.find().toArray();
+    res.send(result);
+})
 
 
 app.post('/services', async(req, res)=>{
