@@ -71,7 +71,12 @@ app.post('/bookings', async(req, res)=>{
     res.send(result);
 })
 
-
+app.get('/bookings/my-bookings/:email', async(req, res)=>{
+    const email = req.params.email;
+    const query = {customerEmail: email};
+    const result = await bookings.find(query).toArray();
+    res.send(result);
+})
 
 app.get('/', async(req, res)=>{
     res.send('Api is working fine');
