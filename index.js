@@ -78,6 +78,14 @@ app.get('/bookings/my-bookings/:email', async(req, res)=>{
     res.send(result);
 })
 
+app.patch('/bookings/:id', async(req, res)=>{
+    const id = req.params.id;
+    const data = req.body;
+    const query = {_id: new ObjectId(id)}
+    const result = await bookings.updateOne(query, {$set: data});
+    res.send(result);
+})
+
 app.get('/', async(req, res)=>{
     res.send('Api is working fine');
 })
