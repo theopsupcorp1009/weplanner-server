@@ -50,6 +50,14 @@ app.post('/services', async(req, res)=>{
     res.send(result);
 })
 
+app.patch('/services/:id', async(req, res)=>{
+    const id = req.params.id;
+    const data = req.body;
+    const query = {_id: new ObjectId(id)}
+    const result = await services.updateOne(query, {$set: data});
+    res.send(result);
+})
+
 
 app.get('/', async(req, res)=>{
     res.send('Api is working fine');
