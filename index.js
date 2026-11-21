@@ -32,34 +32,11 @@ app.get('/categories', async(req, res)=>{
     res.send(result);
 })
 
-app.get('/services', async(req, res)=>{
-    const result = await services.find().toArray();
-    res.send(result);
-})
 
-app.get('/services/:id', async(req, res)=>{
-    const id = req.params.id;
-    const query = {_id: new ObjectId(id)}
-    const result = await services.findOne(query);
-    res.send(result);
-})
 
 app.post('/services', async(req, res)=>{
     const data = req.body;
     const result = await services.insertOne(data);
-    res.send(result);
-})
-
-app.post('/bookings', async(req, res)=>{
-    const data = req.body;
-    const result = await bookings.insertOne(data);
-    res.send(result);
-})
-
-app.get('/bookings/my-bookings/:email', async(req, res)=>{
-    const email = req.params.email;
-    const query = {customerEmail: email};
-    const result = await bookings.find(query).toArray();
     res.send(result);
 })
 
