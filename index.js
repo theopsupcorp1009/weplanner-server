@@ -65,6 +65,11 @@ app.delete('/services/:id', async(req, res)=>{
     res.send(result);
 })
 
+app.get('/bookings', async(req, res)=>{
+    const result = await bookings.find().toArray();
+    res.send(result);
+})
+
 app.post('/bookings', async(req, res)=>{
     const data = req.body;
     const result = await bookings.insertOne(data);
