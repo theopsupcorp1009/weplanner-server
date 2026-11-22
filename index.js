@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
 import { MongoClient, ObjectId } from 'mongodb';
 import 'dotenv/config.js'
@@ -21,6 +22,45 @@ export async function connectToMongoDB() {
   }
 }
 
+const mongoClient = await connectToMongoDB();
+const db = client.db("wedplan");
+const categories = db.collection("categories");
+const services = db.collection("services");
+const bookings = db.collection("bookings");
+const transactions = db.collection("transactions");
+const users = db.collection("user");
+
+const verifyToken = async (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+        return res.status(401).send({message: 'Unauthorized'});
+    }
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await users.findOne({email: decoded.email});
+        if (!user) {
+            return res.status(401).send({message: 'Unauthorized'});
+        }
+        if (user.isBlocked) {
+            return res.status(403).send({message: 'Your account is blocked'});
+        }
+        req.user = user;
+        next();
+    } catch (err) {
+        console.log('Token error:', err.message);
+        return res.status(401).send({message: 'Invalid or expired token'});
+    }
+}
+
+const verifyRole = (role) => {
+    return (req, res, next) => {
+        if (req.user.role !== role) {
+            return res.status(403).send({message: 'Forbidden'});
+        }
+        next();
+    }
+}
 
 app.post('/webhook', express.raw({type: 'application/json'}), async(req, res)=>{
     let event;
@@ -88,47 +128,11 @@ app.post('/webhook', express.raw({type: 'application/json'}), async(req, res)=>{
     res.send({received: true});
 })
 
-const mongoClient = await connectToMongoDB();
-const db = client.db("wedplan");
-const categories = db.collection("categories");
-const services = db.collection("services");
-const bookings = db.collection("bookings");
-const transactions = db.collection("transactions");
-const users = db.collection("user");
-
-const verifyToken = async (req, res, next) => {
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) {
-        return res.status(401).send({message: 'Unauthorized'});
-    }
-
-    try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await users.findOne({email: decoded.email});
-        if (!user) {
-            return res.status(401).send({message: 'Unauthorized'});
-        }
-        if (user.isBlocked) {
-            return res.status(403).send({message: 'Your account is blocked'});
-        }
-        req.user = user;
-        next();
-    } catch (err) {
-        console.log('Token error:', err.message);
-        return res.status(401).send({message: 'Invalid or expired token'});
-    }
-}
-
-const verifyRole = (role) => {
-    return (req, res, next) => {
-        if (req.user.role !== role) {
-            return res.status(403).send({message: 'Forbidden'});
-        }
-        next();
-    }
-}
-
 app.use(express.json());
+
+app.get('/', async(req, res)=>{
+    res.send('Api is working fine');
+})
 
 app.get('/categories', async(req, res)=>{
     const result = await categories.find().toArray();
@@ -136,7 +140,8 @@ app.get('/categories', async(req, res)=>{
 })
 
 app.get('/services', async(req, res)=>{
-    const result = await services.find().toArray();
+    const query = {status: 'approved', isActive: {$ne: false}};
+    const result = await services.find(query).toArray();
     res.send(result);
 })
 
@@ -147,58 +152,8 @@ app.get('/services/:id', async(req, res)=>{
     res.send(result);
 })
 
-app.post('/services', async(req, res)=>{
-    const data = req.body;
-    const result = await services.insertOne(data);
-    res.send(result);
-})
-
-app.patch('/services/:id', async(req, res)=>{
-    const id = req.params.id;
-    const data = req.body;
-    const query = {_id: new ObjectId(id)}
-    const result = await services.updateOne(query, {$set: data});
-    res.send(result);
-})
-
-app.delete('/services/:id', async(req, res)=>{
-    const id = req.params.id;
-    const query = {_id: new ObjectId(id)}
-    const result = await services.deleteOne(query);
-    res.send(result);
-})
-
-app.get('/bookings', async(req, res)=>{
-    const result = await bookings.find().toArray();
-    res.send(result);
-})
-
-app.post('/bookings', async(req, res)=>{
-    const data = req.body;
-    const result = await bookings.insertOne(data);
-    res.send(result);
-})
-
-app.get('/bookings/my-bookings/:email', async(req, res)=>{
-    const email = req.params.email;
-    const query = {customerEmail: email};
-    const result = await bookings.find(query).toArray();
-    res.send(result);
-})
-
-app.patch('/bookings/:id', async(req, res)=>{
-    const id = req.params.id;
-    const data = req.body;
-    const query = {_id: new ObjectId(id)}
-    const result = await bookings.updateOne(query, {$set: data});
-    res.send(result);
-})
-
-app.delete('/bookings/:id', async(req, res)=>{
-    const id = req.params.id;
-    const query = {_id: new ObjectId(id)}
-    const result = await bookings.deleteOne(query);
-    res.send(result);
+app.get('/me', verifyToken, async(req, res)=>{
+    res.send(req.user);
 })
 
 app.post('/payments/create-checkout-session', verifyToken, verifyRole('vendor'), async(req, res)=>{
@@ -217,15 +172,197 @@ app.post('/payments/create-checkout-session', verifyToken, verifyRole('vendor'),
     res.send({url: session.url});
 })
 
-app.get('/me', verifyToken, async(req, res)=>{
-    res.send(req.user);
+app.get('/customer/bookings', verifyToken, verifyRole('customer'), async(req, res)=>{
+    const query = {customerId: req.user._id.toString()};
+    const result = await bookings.find(query).sort({createdAt: -1}).toArray();
+    res.send(result);
 })
 
-app.get('/', async(req, res)=>{
-    res.send('Api is working fine');
+app.post('/customer/bookings', verifyToken, verifyRole('customer'), async(req, res)=>{
+    const { serviceId, eventDate, eventLocation, message } = req.body;
+    const customerId = req.user._id.toString();
+
+    if (!eventDate || !eventLocation) {
+        return res.status(400).send({message: 'Event date and location are required'});
+    }
+    if (eventDate < new Date().toISOString().slice(0, 10)) {
+        return res.status(400).send({message: 'Event date cannot be in the past'});
+    }
+
+    const service = await services.findOne({_id: new ObjectId(serviceId), status: 'approved', isActive: {$ne: false}});
+    if (!service || service.creatorMail === req.user.email) {
+        return res.status(400).send({message: 'This service is not available for booking'});
+    }
+
+    const duplicate = await bookings.findOne({serviceId, eventDate, customerId, status: {$in: ['pending', 'accepted']}});
+    if (duplicate) {
+        return res.status(400).send({message: 'You already have an active request for this service on this date'});
+    }
+
+    const booking = {
+        serviceId,
+        serviceName: service.serviceName,
+        serviceImage: service.images?.[0] || '',
+        vendorId: service.vendorId,
+        vendorName: service.creatorName,
+        creatorMail: service.creatorMail,
+        customerId,
+        customerName: req.user.name,
+        customerEmail: req.user.email,
+        eventDate,
+        eventLocation,
+        message: message || '',
+        status: 'pending',
+        createdAt: new Date(),
+    };
+    const result = await bookings.insertOne(booking);
+    res.send(result);
+})
+
+app.patch('/customer/bookings/:id/cancel', verifyToken, verifyRole('customer'), async(req, res)=>{
+    const id = req.params.id;
+    const query = {_id: new ObjectId(id), customerId: req.user._id.toString(), status: 'pending'}
+    const result = await bookings.updateOne(query, {$set: {status: 'cancelled'}});
+    if (result.modifiedCount === 0) {
+        return res.status(400).send({message: 'Only your pending bookings can be cancelled'});
+    }
+    res.send(result);
+})
+
+app.get('/vendor/services', verifyToken, verifyRole('vendor'), async(req, res)=>{
+    const query = {vendorId: req.user._id.toString()};
+    const result = await services.find(query).sort({createdAt: -1}).toArray();
+    res.send(result);
+})
+
+app.post('/vendor/services', verifyToken, verifyRole('vendor'), async(req, res)=>{
+    const { serviceName, category, description, price, location, images } = req.body;
+    const vendorId = req.user._id.toString();
+
+    if (!serviceName || !category || !description || !price || !location || !images?.length) {
+        return res.status(400).send({message: 'All fields and at least one image are required'});
+    }
+
+    const activeCount = await services.countDocuments({vendorId, isActive: true, status: {$ne: 'rejected'}});
+    if (req.user.subscriptionPlan !== 'premium' && activeCount >= 3) {
+        return res.status(400).send({message: 'Free plan allows 3 active services. Upgrade to Premium.'});
+    }
+
+    const service = {
+        vendorId,
+        creatorName: req.user.businessName || req.user.name,
+        creatorMail: req.user.email,
+        isPremiumVendor: req.user.subscriptionPlan === 'premium',
+        serviceName,
+        category,
+        description,
+        price: Number(price),
+        location,
+        images,
+        purchaseCount: 0,
+        status: 'pending',
+        isActive: true,
+        createdAt: new Date(),
+    };
+    const result = await services.insertOne(service);
+    res.send(result);
+})
+
+app.patch('/vendor/services/:id', verifyToken, verifyRole('vendor'), async(req, res)=>{
+    const id = req.params.id;
+    const { serviceName, category, description, price, location, images } = req.body;
+    const query = {_id: new ObjectId(id), vendorId: req.user._id.toString()}
+    const result = await services.updateOne(query, {$set: {serviceName, category, description, price: Number(price), location, images}});
+    res.send(result);
+})
+
+app.patch('/vendor/services/:id/availability', verifyToken, verifyRole('vendor'), async(req, res)=>{
+    const id = req.params.id;
+    const { isActive } = req.body;
+    const vendorId = req.user._id.toString();
+
+    const activeCount = await services.countDocuments({vendorId, isActive: true, status: {$ne: 'rejected'}});
+    if (isActive && req.user.subscriptionPlan !== 'premium' && activeCount >= 3) {
+        return res.status(400).send({message: 'Free plan allows 3 active services. Upgrade to Premium.'});
+    }
+
+    const query = {_id: new ObjectId(id), vendorId}
+    const result = await services.updateOne(query, {$set: {isActive: Boolean(isActive)}});
+    res.send(result);
+})
+
+app.delete('/vendor/services/:id', verifyToken, verifyRole('vendor'), async(req, res)=>{
+    const id = req.params.id;
+    const query = {_id: new ObjectId(id), vendorId: req.user._id.toString()}
+    const result = await services.deleteOne(query);
+    res.send(result);
+})
+
+app.get('/vendor/bookings', verifyToken, verifyRole('vendor'), async(req, res)=>{
+    const query = {vendorId: req.user._id.toString()};
+    const result = await bookings.find(query).sort({createdAt: -1}).toArray();
+    res.send(result);
+})
+
+app.patch('/vendor/bookings/:id', verifyToken, verifyRole('vendor'), async(req, res)=>{
+    const id = req.params.id;
+    const { status } = req.body;
+
+    if (status !== 'accepted' && status !== 'rejected') {
+        return res.status(400).send({message: 'Status must be accepted or rejected'});
+    }
+
+    const query = {_id: new ObjectId(id), vendorId: req.user._id.toString(), status: 'pending'}
+    const result = await bookings.updateOne(query, {$set: {status}});
+    if (result.modifiedCount === 0) {
+        return res.status(400).send({message: 'Only your pending requests can be processed'});
+    }
+    res.send(result);
+})
+
+app.get('/admin/users', verifyToken, verifyRole('admin'), async(req, res)=>{
+    const result = await users.find().toArray();
+    res.send(result);
+})
+
+app.patch('/admin/users/:id', verifyToken, verifyRole('admin'), async(req, res)=>{
+    const id = req.params.id;
+    const { isBlocked } = req.body;
+    const query = {_id: new ObjectId(id), role: {$ne: 'admin'}}
+    const result = await users.updateOne(query, {$set: {isBlocked: Boolean(isBlocked)}});
+    res.send(result);
+})
+
+app.get('/admin/services', verifyToken, verifyRole('admin'), async(req, res)=>{
+    const result = await services.find().sort({createdAt: -1}).toArray();
+    res.send(result);
+})
+
+app.patch('/admin/services/:id', verifyToken, verifyRole('admin'), async(req, res)=>{
+    const id = req.params.id;
+    const { status } = req.body;
+
+    if (!['pending', 'approved', 'rejected'].includes(status)) {
+        return res.status(400).send({message: 'Invalid status'});
+    }
+
+    const query = {_id: new ObjectId(id)}
+    const result = await services.updateOne(query, {$set: {status}});
+    res.send(result);
+})
+
+app.delete('/admin/services/:id', verifyToken, verifyRole('admin'), async(req, res)=>{
+    const id = req.params.id;
+    const query = {_id: new ObjectId(id)}
+    const result = await services.deleteOne(query);
+    res.send(result);
+})
+
+app.get('/admin/transactions', verifyToken, verifyRole('admin'), async(req, res)=>{
+    const result = await transactions.find().sort({createdAt: -1}).toArray();
+    res.send(result);
 })
 
 app.listen(port, ()=>{
     console.log(`Server is running on port ${port}`)
 });
-
