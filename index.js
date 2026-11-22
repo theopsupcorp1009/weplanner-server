@@ -1,13 +1,14 @@
 import express from 'express';
 import cors from 'cors';
+import Stripe from 'stripe';
 import { MongoClient, ObjectId } from 'mongodb';
 import 'dotenv/config.js'
 
 const app = express();
 app.use(cors());
-app.use(express.json());
 
 const port = process.env.PORT || 5000;
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const client = new MongoClient(process.env.MONGODB_URI);
 export async function connectToMongoDB() {
@@ -19,6 +20,73 @@ export async function connectToMongoDB() {
     console.dir(err);
   }
 }
+
+
+app.post('/webhook', express.raw({type: 'application/json'}), async(req, res)=>{
+    let event;
+
+    try {
+        event = stripe.webhooks.constructEvent(
+            req.body,
+            req.headers['stripe-signature'],
+            process.env.STRIPE_WEBHOOK_SECRET
+        );
+    } catch (err) {
+        return res.status(400).send({message: 'Invalid webhook signature'});
+    }
+
+    if (event.type === 'checkout.session.completed') {
+        const session = event.data.object;
+        const alreadySaved = await transactions.findOne({stripeSessionId: session.id});
+
+        if (session.payment_status === 'paid' && !alreadySaved) {
+            const vendorId = session.metadata.vendorId;
+            const vendor = await users.findOne({_id: new ObjectId(vendorId)});
+            const subscription = await stripe.subscriptions.retrieve(session.subscription);
+            const periodEnd = subscription.current_period_end || subscription.items.data[0].current_period_end;
+
+            await users.updateOne(
+                {_id: new ObjectId(vendorId)},
+                {$set: {subscriptionPlan: 'premium', subscriptionExpiresAt: new Date(periodEnd * 1000)}}
+            );
+            await services.updateMany({vendorId}, {$set: {isPremiumVendor: true}});
+            await transactions.insertOne({
+                vendorId,
+                vendorName: vendor.name,
+                vendorEmail: vendor.email,
+                plan: 'premium',
+                amount: session.amount_total / 100,
+                currency: session.currency,
+                stripeSessionId: session.id,
+                stripeSubscriptionId: session.subscription,
+                status: 'paid',
+                createdAt: new Date(),
+            });
+        }
+    }
+
+    if (event.type === 'customer.subscription.updated') {
+        const subscription = event.data.object;
+        const periodEnd = subscription.current_period_end || subscription.items.data[0].current_period_end;
+
+        await users.updateOne(
+            {_id: new ObjectId(subscription.metadata.vendorId)},
+            {$set: {subscriptionExpiresAt: new Date(periodEnd * 1000)}}
+        );
+    }
+
+    if (event.type === 'customer.subscription.deleted') {
+        const vendorId = event.data.object.metadata.vendorId;
+
+        await users.updateOne(
+            {_id: new ObjectId(vendorId)},
+            {$set: {subscriptionPlan: 'free', subscriptionExpiresAt: null}}
+        );
+        await services.updateMany({vendorId}, {$set: {isPremiumVendor: false}});
+    }
+
+    res.send({received: true});
+})
 
 const mongoClient = await connectToMongoDB();
 const db = client.db("wedplan");
@@ -59,6 +127,8 @@ const verifyRole = (role) => {
         next();
     }
 }
+
+app.use(express.json());
 
 app.get('/categories', async(req, res)=>{
     const result = await categories.find().toArray();
