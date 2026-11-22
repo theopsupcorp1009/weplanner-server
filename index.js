@@ -30,37 +30,6 @@ const bookings = db.collection("bookings");
 const transactions = db.collection("transactions");
 const users = db.collection("user");
 
-const verifyToken = async (req, res, next) => {
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) {
-        return res.status(401).send({message: 'Unauthorized'});
-    }
-
-    try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await users.findOne({email: decoded.email});
-        if (!user) {
-            return res.status(401).send({message: 'Unauthorized'});
-        }
-        if (user.isBlocked) {
-            return res.status(403).send({message: 'Your account is blocked'});
-        }
-        req.user = user;
-        next();
-    } catch (err) {
-        console.log('Token error:', err.message);
-        return res.status(401).send({message: 'Invalid or expired token'});
-    }
-}
-
-const verifyRole = (role) => {
-    return (req, res, next) => {
-        if (req.user.role !== role) {
-            return res.status(403).send({message: 'Forbidden'});
-        }
-        next();
-    }
-}
 
 app.post('/webhook', express.raw({type: 'application/json'}), async(req, res)=>{
     let event;
@@ -127,6 +96,38 @@ app.post('/webhook', express.raw({type: 'application/json'}), async(req, res)=>{
 
     res.send({received: true});
 })
+
+const verifyToken = async (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+        return res.status(401).send({message: 'Unauthorized'});
+    }
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await users.findOne({email: decoded.email});
+        if (!user) {
+            return res.status(401).send({message: 'Unauthorized'});
+        }
+        if (user.isBlocked) {
+            return res.status(403).send({message: 'Your account is blocked'});
+        }
+        req.user = user;
+        next();
+    } catch (err) {
+        console.log('Token error:', err.message);
+        return res.status(401).send({message: 'Invalid or expired token'});
+    }
+}
+
+const verifyRole = (role) => {
+    return (req, res, next) => {
+        if (req.user.role !== role) {
+            return res.status(403).send({message: 'Forbidden'});
+        }
+        next();
+    }
+}
 
 app.use(express.json());
 
@@ -366,3 +367,5 @@ app.get('/admin/transactions', verifyToken, verifyRole('admin'), async(req, res)
 app.listen(port, ()=>{
     console.log(`Server is running on port ${port}`)
 });
+
+export default app;
