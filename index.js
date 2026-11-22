@@ -26,6 +26,30 @@ const categories = db.collection("categories");
 const services = db.collection("services");
 const bookings = db.collection("bookings");
 const transactions = db.collection("transactions");
+const users = db.collection("user");
+
+const verifyToken = async (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+        return res.status(401).send({message: 'Unauthorized'});
+    }
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await users.findOne({email: decoded.email});
+        if (!user) {
+            return res.status(401).send({message: 'Unauthorized'});
+        }
+        if (user.isBlocked) {
+            return res.status(403).send({message: 'Your account is blocked'});
+        }
+        req.user = user;
+        next();
+    } catch (err) {
+        console.log('Token error:', err.message);
+        return res.status(401).send({message: 'Invalid or expired token'});
+    }
+}
 
 app.get('/categories', async(req, res)=>{
     const result = await categories.find().toArray();
