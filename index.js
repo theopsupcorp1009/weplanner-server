@@ -51,6 +51,15 @@ const verifyToken = async (req, res, next) => {
     }
 }
 
+const verifyRole = (role) => {
+    return (req, res, next) => {
+        if (req.user.role !== role) {
+            return res.status(403).send({message: 'Forbidden'});
+        }
+        next();
+    }
+}
+
 app.get('/categories', async(req, res)=>{
     const result = await categories.find().toArray();
     res.send(result);
