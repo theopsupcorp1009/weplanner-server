@@ -201,6 +201,26 @@ app.delete('/bookings/:id', async(req, res)=>{
     res.send(result);
 })
 
+app.post('/payments/create-checkout-session', verifyToken, verifyRole('vendor'), async(req, res)=>{
+    const vendorId = req.user._id.toString();
+
+    const session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        line_items: [{price: process.env.STRIPE_PREMIUM_PRICE_ID, quantity: 1}],
+        customer_email: req.user.email,
+        metadata: {vendorId},
+        subscription_data: {metadata: {vendorId}},
+        success_url: `${process.env.CLIENT_URL}/payment/success`,
+        cancel_url: `${process.env.CLIENT_URL}/payment/cancel`,
+    });
+
+    res.send({url: session.url});
+})
+
+app.get('/me', verifyToken, async(req, res)=>{
+    res.send(req.user);
+})
+
 app.get('/', async(req, res)=>{
     res.send('Api is working fine');
 })
